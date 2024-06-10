@@ -1,0 +1,135 @@
+---
+title: "HRP 203 Report"
+format: pdf
+link-citations: true
+bibliography: references.bib
+---
+
+## Introduction
+
+There is a sizeable and growing literature on fair regression approaches. Some approaches involve modifications on input data [@feldman; @gordaliza2019; @hu2024] but many are focused on modifying the objective or loss function of predictive models in a way that values some notion of fairness. These loss functions commonly include a traditional error term, such as the mean squared error, as well as either a penalty or constraint based on some mathematical notion of unfairness, such as a requirement of statistical parity between two groups [@calders2013; @berk]. Some subsequent work has focused on technical methods for solving constrained or penalized prediction problems [@dwork; @chzhen2020; @lohaus2020; @mishler], and some has focused on tailoring and applying these methods to important problem settings like cyberbullying [@gencoglu2021] and health care and health policy [@zink2020].
+
+For this class project, I will be implementing a simplified version of these methods on simulated data in order to demonstrate the value of fair learning techniques. Specifically, I will impose penalties on the under-prediction of spending for non-female individuals, whose spending is under-predicted in the unpenalized model. I will show that this reduces under-prediction with modest but meaningful decreases in accuracy. 
+
+## Methods
+
+I will be using the HRP 203 simulated dataset for this project. This dataset has 5000 observations of five variables: `smoke`, `female`, `age`, `cardiac`, and `cost`. There is no available data dictionary on information about the data generating process. I will be focusing on predicting `cost` using the other variables except for `female`. In this exercise, we are treating `female` as a protected class that we will not include as a control but do not want to be correlated with our predictions, as we do not want to simply shift predictions up or down on the basis of this variable. 
+
+First, I will create a simple linear regression to predict spending using all other available variables except for `female`. Let there be $N$ individuals in the dataset. For individual $i$, I will note cost as $Y_i$, an indicator for being female with $F_i$, and a vector of covariates $Z_i$ (which includes a 1 for the intercept term, `smoke`, `age`, and `cardiac`. I will fit a vector of regression coefficients $\beta$ according to the equation
+
+$$Y_i = \beta Z_i + \epsilon_i$$
+
+Next, I will identify under-prediction, as measured by the mean residuals, with respect to sex (or gender - there is no data dictionary available for the synthetic data). Let $\hat\beta$ be the fitted vector of all regression coefficients. For individuals whose sex is female, the mean residual will be calculated as
+
+$$MR_{F} =   \frac{\sum_{i = 1}^N\left(Z_i \hat \beta - Y_i\right)F_i}{\sum_{i = 1}^NF_i}$$
+
+If this value is less than 0, this indicates that spending is under-predicted by the simple regression for individuals whose sex is female. Because the mean residual across all training observations is 0, if the mean residual for individuals whose sex is female is less than 0, then the mean residual for individuals whose sex is not female will be greater than 0 and vice versa. For the sex category that is under-predicted (with a mean residual less than 0), I will impose a penalty on under-prediction in the model fitting process. This means that in order to identify the optimal coefficient vector $\hat\beta$, instead of minimizing the traditional linear regression loss function of the mean squared error
+
+$$L = \frac1n \sum_{i=1}^n(Y_i - Z_i \beta)^2 $$
+
+with respect to $\beta$, I will minimize a loss function that also includes a constant $\lambda$ multiple of the mean residual for individuals in the under-predicted sex category (who I will note as being in group $g$, which has $N_g$ individuals in it).
+
+$$L = \frac1n \sum_{i=1}^N(Y_i - Z_i \beta)^2 + \frac{\lambda}{N_g} \sum_{j\in g}(Y_j - Z_j \beta) $$
+
+The derivative of this loss function with respect to $\beta$ is 
+
+$$\frac{\partial L}{\partial \beta} = -\frac2N\sum_{i=1}^n (Y_iZ_i' - Z_i'Z_i \beta) - \frac{\lambda}{N_g} \sum_{j \in g}Z_j'$$
+
+I can then set this derivative equal to 0 and solve for the closed form solution for the optimal $\beta$ for this penalized regression. 
+
+$$\frac2n\sum_{i=1}^N Z_i'Z_i \beta  = \frac2N\sum_{i=1}^n Z_i'Y_i + \frac{\lambda}{N_g} \sum_{j \in g}Z_j'$$
+
+$$\hat\beta = \left(\frac2N\sum_{i=1}^N Z_i'Z_i\right)^{-1} \left(\frac2N\sum_{i=1}^N Z_i'Y_i +  \frac{\lambda}{N_g} \sum_{j \in g}Z_j'\right)$$
+
+In this simplified example, I will be arbitrarily using a penalty value of $10$. In a rigorous real-world use case, this value would be selected as the value that optimizes some pre-specified score, likely one that accounts for the desired accuracy and desired fairness. 
+
+Finally, I will display plots of the predicted vs actual spending values for the penalized and unpenalized linear regressions and report the $R^2$ (the chosen measure of accuracy) and mean residual values for the initially under-predicted sex group under both models. 
+
+## Results
+
+```{r}
+#| include: false
+# load data
+cohort <- read.csv("raw-data/cohort.csv")
+
+# generate table
+library(tableone)
+vars = c("smoke", "age", "cardiac", "cost")
+t1 <- print(CreateTableOne(vars = vars, strata = "female", 
+                     data = cohort, test = FALSE), smd = T)
+```
+
+```{r}
+#| echo: false
+knitr::kable(t1, caption = "Simulated Cohort Data by Female Sex")
+```
+
+
+The simulated dataset has `r dim(cohort)[1]` individuals in it, `r dim(cohort[cohort$female==1,])[1]` of whom have the sex female. There are heavily overlapping distributions of all variables across the sex categories, but the mean values of `cost` and `cardiac` are lower among individuals whose sex is female, with high standardized mean differences. 
+
+```{r}
+#| include: false
+# fit basic linear regression
+basic_lm <- lm(cost ~ smoke + age + cardiac, data = cohort)
+# get predictions from linear regression
+cohort$cost_pred <- predict(basic_lm, cohort)
+# calculate mean residuals for all sex categories
+print(paste("female:", mean(cohort[cohort$female == 1, 'cost_pred'] - 
+                              cohort[cohort$female == 1, 'cost'])))
+print(paste("not female:", mean(cohort[cohort$female == 0, 'cost_pred'] - 
+                                  cohort[cohort$female == 0, 'cost'])))
+```
+
+I find that the mean residual for individuals whose sex is female is `r mean(cohort[cohort$female == 1, 'cost_pred'] - cohort[cohort$female == 1, 'cost'])` and it is `r mean(cohort[cohort$female == 0, 'cost_pred'] - cohort[cohort$female == 0, 'cost'])` for other individuals. This indicates that non-females are under-predicted by the baseline model. 
+
+```{r}
+# add intercept to cohort data
+cohort <- cbind(int = 1, cohort)
+# prepare variables for matrix calculation
+X <- data.matrix(cohort[c('int','smoke','age','cardiac')])
+y <- data.matrix(cohort['cost'])
+n <- dim(cohort)[1]
+lam <- 100
+# calculate penalty term
+pen_term <- colMeans(cohort[cohort$female==0,
+                            c('int','smoke','age','cardiac')])
+# calculated Beta closed form solution
+Beta <- solve(t(X) %*% X / n) %*% (t(X) %*% y / n + lam * pen_term)
+```
+
+```{r}
+#| echo: false
+library(ggplot2)
+# plot the original predictions
+cohort$female <- factor(cohort$female)
+ggplot(cohort, aes(x=cost_pred, y= cost, color = female)) +
+  geom_point() +
+  geom_abline(intercept=0, slope=1) +
+  labs(x='Predicted Values', y='Actual Values', title='Unpenalized Predictions')
+
+# plot the penalized predictions
+cohort$cost_pred_pen <- X %*% Beta
+ggplot(cohort, aes(x=cost_pred_pen, y= cost, color = female)) +
+  geom_point() +
+  geom_abline(intercept=0, slope=1) +
+  labs(x='Predicted Values', y='Actual Values', title='Penalized Predictions')
+```
+
+The penalized predictions are higher for all individuals, but they are differentially higher for non-female individuals, shrinking the residual gaps between sex groups. 
+
+```{r}
+#| include: false
+# calculate mean residuals for penalized model
+print(paste("female:", mean(cohort[cohort$female == 1, 'cost_pred_pen'] - 
+                              cohort[cohort$female == 1, 'cost'])))
+print(paste("not female:", mean(cohort[cohort$female == 0, 'cost_pred_pen'] - 
+                                  cohort[cohort$female == 0, 'cost'])))
+# calculate r2
+rss <- sum((cohort$cost_pred_pen - cohort$cost) ^ 2)  ## residual sum of squares
+tss <- sum((cohort$cost - mean(cohort$cost)) ^ 2)  ## total sum of squares
+1 - rss/tss
+```
+
+For the penalized regression, I find that the mean residual for individuals whose sex is female is `r mean(cohort[cohort$female == 1, 'cost_pred_pen'] - cohort[cohort$female == 1, 'cost'])` and it is `r mean(cohort[cohort$female == 0, 'cost_pred_pen'] - cohort[cohort$female == 0, 'cost'])` for other individuals. This indicates that under-prediction for non-females is much lower than it is in the baseline model because the predictions are shifting up. The $R^2$ value for the unpenalized model is `r summary(basic_lm)$r.squared`, while it is `r 1 - rss/tss` for the penalized model. There are some decreases in accuracy that come with the substantial decrease in under-prediction. 
+
+## Citations
