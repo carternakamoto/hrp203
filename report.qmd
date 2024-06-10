@@ -132,4 +132,6 @@ tss <- sum((cohort$cost - mean(cohort$cost)) ^ 2)  ## total sum of squares
 
 For the penalized regression, I find that the mean residual for individuals whose sex is female is `r mean(cohort[cohort$female == 1, 'cost_pred_pen'] - cohort[cohort$female == 1, 'cost'])` and it is `r mean(cohort[cohort$female == 0, 'cost_pred_pen'] - cohort[cohort$female == 0, 'cost'])` for other individuals. This indicates that under-prediction for non-females is much lower than it is in the baseline model because the predictions are shifting up. The $R^2$ value for the unpenalized model is `r summary(basic_lm)$r.squared`, while it is `r 1 - rss/tss` for the penalized model. There are some decreases in accuracy that come with the substantial decrease in under-prediction. 
 
+The Github repository for this project is located [here](https://github.com/carternakamoto/hrp203/tree/main). 
+
 ## Citations
